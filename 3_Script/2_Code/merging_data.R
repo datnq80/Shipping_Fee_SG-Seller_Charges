@@ -1,7 +1,7 @@
 # Read OMS Monthly Data
 setClass('myDateTime')
 setAs("character","myDateTime", function(from) as.POSIXct(from, format="%Y-%m-%d %H:%M:%S")) #covnert datetime string to datetime
-monthData <- read.csv(destFile,
+monthData <- read.csv(file.path(inputDir,"OMS_Data",paste0("MP_Shipping_Fee_Monthly_Raw_Singapore_",monthRun,".csv")),
                       colClasses = c("integer","character","character","character","integer","character","character",
                                      "character","character","character","character","myDateTime",
                                      "myDateTime","myDateTime","character","character","character",
@@ -28,9 +28,9 @@ masterData <- filter(newMasterData,Tracking.Number %in% monthData$Tracking.Numbe
 
 # Merging all data into one merged data
 masterData <- left_join(masterData,deliveryCompany,
-                        c=("Delivery.Company"))
+                        by=c("Delivery.Company"))
 masterData <- left_join(masterData,sellerRateCards,
-                        c=("Seller.ID"))
+                        by=c("Seller.ID"="Seller.Center.ID"))
 
 # Mark data to be counted
 masterData <- masterData %>%
@@ -45,23 +45,18 @@ masterData <- masterData %>%
 masterData <- masterData %>%
         mutate(returnedReview=ifelse((Returned.Date>=dateBegin & Returned.Date<=dateEnd & 
                                               (grepl("customer_-_changed_mind",return_reason))),1,0))
+
 masterData <- masterData %>%
-        mutate(Rate.cards=as.character(ifelse((!is.na(Shipped.Date) & Shipped.Date>=Rate_card_1_Begin & Shipped.Date<=Rate_card_1_End) |
-                                                      (!is.na(Cancelled.Date) & Cancelled.Date>=Rate_card_1_Begin & Cancelled.Date<=Rate_card_1_End) |
-                                                      (!is.na(Returned.Date) & Returned.Date>=Rate_card_1_Begin & Returned.Date<=Rate_card_1_End),
-                                              as.character(Rate_card_1),
-                                 ifelse((!is.na(Shipped.Date) & Shipped.Date>=Rate_card_2_Begin & Shipped.Date<=Rate_card_2_End) |
-                                                (!is.na(Cancelled.Date) & Cancelled.Date>=Rate_card_2_Begin & Cancelled.Date<=Rate_card_2_End) |
-                                                (!is.na(Returned.Date) & Returned.Date>=Rate_card_2_Begin & Returned.Date<=Rate_card_2_End),
-                                        as.character(Rate_card_2),
-                                        NA))))
-masterData <- masterData %>%
-        mutate(Billing.Type=ifelse(grepl("Direct Billing with subsidies",Direct_Billing),"Direct_Billing",
-                                   ifelse(grepl("Direct Billing with NO subsidies",Direct_Billing),"Direct_Billing_NO_subsidies",
-                                                NA)))
+    mutate(Billing.Type=ifelse(grepl("Direct Billing with subsidies",Direct.Billing),"Direct_Billing",
+                               ifelse(grepl("Direct Billing with NO subsidies",Direct.Billing),"Direct_Billing_NO_subsidies",
+                                      NA)))
+
+validSoi <- filter(masterData,!is.na(Ratecards),!is.na(Shipped.Date),Delivery.Company.Type=="Standard")
+validSoi <- filter(validSoi, shipCharged + rebateReview + returnedCharge + returnedReview >0)
+validSoi <- filter(validSoi, !(!is.na(Cancelled.Date) & !is.na(Returned.Date)))
 
 # Extract missing seller rate cards
-missingRateCards <- filter(masterData, is.na(Rate.cards), !is.na(Shipped.Date),
+missingRateCards <- filter(validSoi, is.na(Ratecards), !is.na(Shipped.Date),
                            shipCharged==1 | rebateReview==1 | returnedReview==1)
 sellerMissingRateCards <- missingRateCards %>% group_by(Seller.ID,Seller.Name) %>%
         summarize(sales.item.count=n())
